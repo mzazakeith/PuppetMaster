@@ -13,8 +13,12 @@ const router = express.Router();
 // Validation schemas
 const actionSchema = Joi.object({
   type: Joi.string().required().valid(
+    // Puppeteer actions
     'navigate', 'scrape', 'click', 'type', 'screenshot', 
-    'pdf', 'wait', 'evaluate', 'scroll', 'select'
+    'pdf', 'wait', 'evaluate', 'scroll', 'select',
+    // Crawl4AI actions
+    'crawl', 'extract', 'generateSchema', 'verify', 'crawlLinks',
+    'filter', 'extractPDF'
   ),
   params: Joi.object().required()
 });

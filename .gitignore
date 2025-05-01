@@ -3,3 +3,7 @@ node_modules
 package-lock.json
 test*
 public/
+__pycache__/
+.venv/
+.idea/
+.vscode/

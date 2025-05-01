@@ -53,7 +53,7 @@ app.use('/api', apiRoutes);
 app.use(errorHandler);
 
 // Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'MONGODB_URI=REDACTED', {
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/puppet-master', {
   serverSelectionTimeoutMS: 30000,   // Increase from default 30s to 30s (explicitly set)
   socketTimeoutMS: 45000,            // Increase socket timeout
   connectTimeoutMS: 30000,           // Connection timeout

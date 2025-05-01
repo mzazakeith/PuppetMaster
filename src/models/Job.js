@@ -5,7 +5,14 @@ const actionSchema = new mongoose.Schema({
   type: {
     type: String,
     required: true,
-    enum: ['navigate', 'scrape', 'click', 'type', 'screenshot', 'pdf', 'wait', 'evaluate', 'scroll', 'select']
+    enum: [
+      // Puppeteer actions
+      'navigate', 'scrape', 'click', 'type', 'screenshot', 'pdf', 
+      'wait', 'evaluate', 'scroll', 'select',
+      // Crawl4AI actions
+      'crawl', 'extract', 'generateSchema', 'verify', 'crawlLinks',
+      'filter', 'extractPDF'
+    ]
   },
   params: {
     type: mongoose.Schema.Types.Mixed,

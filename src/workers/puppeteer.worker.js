@@ -10,7 +10,7 @@ const Job = require('../models/Job');
 
 // MongoDB Connection Logic
 const connectToDatabase = async () => {
-  const mongoUri = process.env.MONGODB_URI || 'MONGODB_URI=REDACTED';
+  const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/puppet-master';
   if (mongoose.connection.readyState >= 1) {
     logger.info('MongoDB connection already established.');
     return;
