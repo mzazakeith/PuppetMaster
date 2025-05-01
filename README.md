@@ -26,6 +26,15 @@ A powerful microservice for web automation, scraping, and data processing, integ
   - 💾 Local file storage for generated assets (screenshots, PDFs, Markdown files)
   - 📈 API endpoints for job management and queue monitoring
 
+## Key Technologies
+
+*   **Backend:** Node.js, Express.js
+*   **Web Automation:** Puppeteer
+*   **Crawling & AI:** Python, FastAPI, Crawl4AI
+*   **Job Queue:** BullMQ, Redis
+*   **Database:** MongoDB (with Mongoose)
+*   **Language:** JavaScript, Python
+
 ## Installation
 
 ### Prerequisites
@@ -86,8 +95,12 @@ A powerful microservice for web automation, scraping, and data processing, integ
     CRAWL4AI_PORT=8000 # Port for the Python Crawl4AI service
     JOB_ATTEMPTS=3 # Default Bull queue job attempts
     JOB_TIMEOUT=300000 # Default Bull queue job timeout (ms)
-    # Add any necessary API keys for LLM providers (e.g., OPENAI_API_KEY) if using LLMExtractionStrategy
+    # Add necessary API keys for LLM providers if using LLMExtractionStrategy
+    # Example for OpenAI (only required if using OpenAI models):
     # OPENAI_API_KEY=your_openai_api_key
+
+    # Example for Google Gemini (only required if using Gemini models):
+    # GOOGLE_API_KEY=your_google_ai_api_key
     ```
 
 5.  **Start the Services and Workers:**
@@ -103,25 +116,52 @@ A powerful microservice for web automation, scraping, and data processing, integ
     ```
 
     These scripts run the following components:
-    *   Node.js API Server (`src/index.js`)
-    *   Puppeteer Worker (`src/workers/puppeteer.worker.js`) - Started via `test-worker.js` in the script, **consider renaming `test-worker.js` to `src/workers/puppeteer.worker.js` and updating `package.json` if that's the intended main worker.**
-    *   Crawl4AI Python Service (`src/crawl4ai/main.py`) - Started via `./start-crawl4ai.sh`
+    *   Node.js API Server (`src/index.js`) - Also processes jobs from the `crawl4ai-jobs` queue.
+    *   Puppeteer Worker (`src/workers/puppeteer.worker.js`) - Processes jobs from the `puppeteer-jobs` queue.
+    *   Crawl4AI Python Service (`src/crawl4ai/main.py`) - Handles Crawl4AI API requests from the Node.js worker.
 
     Alternatively, you can start components individually:
 
     ```bash
     # Start Node.js API (Terminal 1)
+    # This process also handles processing for Crawl4AI jobs.
     npm start  # or npm run dev
 
     # Start Puppeteer Worker (Terminal 2)
-    # Make sure the worker file path is correct in package.json start:worker/dev:worker script
+    # Processes only Puppeteer-specific jobs.
     npm run start:worker # or npm run dev:worker
 
-    # Start Crawl4AI Service (Terminal 3)
+    # Start Crawl4AI Python Service (Terminal 3)
     npm run start:crawl4ai
     # or directly: ./start-crawl4ai.sh
     # or: source .venv/bin/activate && python src/crawl4ai/main.py
     ```
+
+## Architecture Overview
+
+PuppetMaster uses a microservice architecture:
+
+*   **Node.js API Server (`src/index.js`):** 
+    *   Exposes REST API endpoints for job management and queue monitoring.
+    *   Uses Express.js, Mongoose (for MongoDB interaction), and Bull for queue management.
+    *   Handles incoming job requests, saving them to MongoDB.
+    *   Adds jobs to either the Puppeteer or Crawl4AI Bull queue based on action types.
+    *   Processes jobs from the `crawl4ai-jobs` queue by interacting with the Crawl4AI Python Service.
+*   **Puppeteer Worker (`src/workers/puppeteer.worker.js`):**
+    *   A separate Node.js process that listens to the `puppeteer-jobs` Bull queue.
+    *   Executes Puppeteer-specific browser automation tasks (navigate, click, screenshot, etc.).
+    *   Updates job status and results in MongoDB.
+*   **Crawl4AI Python Service (`src/crawl4ai/`):**
+    *   A FastAPI application providing endpoints for advanced crawling and extraction tasks.
+    *   Uses the `Crawl4AI` library internally.
+    *   Communicates with the Node.js API/worker process via HTTP requests.
+*   **Bull Queues (Redis):** Manages job processing, ensuring robustness and retries.
+*   **MongoDB:** Persists job definitions, status, results, and generated asset metadata.
+*   **Local File Storage (`/public`):** Stores generated files like screenshots, PDFs, and Markdown files.
+
+*   **Error Handling:** Uses a centralized error handler (`src/middleware/errorHandler.js`) providing consistent JSON error responses (see `ApiError` class).
+*   **Validation:** Incoming requests for specific endpoints (like job creation) are validated using Joi schemas (`src/middleware/validation.js`).
+*   **Job Model:** Job details, including status, results, assets, and progress, are stored in MongoDB using the schema defined in `src/models/Job.js`.
 
 ## API Documentation
 
@@ -366,105 +406,94 @@ Jobs consist of a sequence of actions. Each action has a `type` and `params`.
 | Action Type  | Description                      | Parameters (`params`)                                                                                                |
 | :----------- | :------------------------------- | :------------------------------------------------------------------------------------------------------------------- |
 | `navigate`   | Go to a URL                      | `url` (string, required)                                                                                             |
-| `scrape`     | Extract content from element(s)  | `selector` (string, required), `attribute` (string, optional, default: `textContent`), `multiple` (boolean, optional) |
+| `scrape`     | Extract content from element(s)  | `selector` (string, required), `attribute` (string, optional, default: `textContent`), `multiple` (boolean, optional) | `multiple: true` scrapes all matching elements into an array.                                                           |
 | `click`      | Click an element                 | `selector` (string, required)                                                                                        |
 | `type`       | Type text into an input          | `selector` (string, required), `value` (string, required), `delay` (number, optional, ms)                             |
-| `screenshot` | Take a screenshot                | `selector` (string, optional), `fullPage` (boolean, optional, default: false)                                        |
-| `pdf`        | Generate PDF of the current page | `format` (string, optional, e.g., `A4`), `margin` (object, optional, e.g., `{top: '10mm', ...}`), `printBackground` (boolean, optional) |
-| `wait`       | Wait for element or timeout      | `selector` (string, optional), `timeout` (number, optional, ms, default: 30000)                                       |
-| `evaluate`   | Run custom JavaScript on page    | `script` (string, required) - *Must be a self-contained function body or expression*                                 |
-| `scroll`     | Scroll page or element           | `selector` (string, optional - scrolls element into view), `x` (number, optional - scrolls window), `y` (number, optional - scrolls window) |
+| `screenshot` | Take a screenshot                | `selector` (string, optional), `fullPage` (boolean, optional, default: false)                                        | Saves to `/public/screenshots` and returns the URL.                                                                 |
+| `pdf`        | Generate PDF of the current page | `format` (string, optional, e.g., `A4`), `margin` (object, optional, e.g., `{top: '10mm', ...}`), `printBackground` (boolean, optional) | Saves to `/public/pdfs` and returns the URL.                                                                        |
+| `wait`       | Wait for element or timeout      | `selector` (string, optional), `timeout` (number, optional, ms, default: 30000)                                       | Waits for the element to appear or the specified timeout.                                                           |
+| `evaluate`   | Run custom JavaScript on page    | `script` (string, required) - *Must be a self-contained function body or expression*                                 | Returns the result of the script evaluation.                                                                        |
+| `scroll`     | Scroll page or element           | `selector` (string, optional - scrolls element into view), `x` (number, optional - scrolls window), `y` (number, optional - scrolls window) | Scrolls window or brings element into view.                                                                         |
 | `select`     | Select an option in a dropdown   | `selector` (string, required), `value` (string, required)                                                            |
 
 ### Crawl4AI Actions (Handled by `crawl4ai.worker.js` via Python Service)
 
-*Note: These actions are forwarded to the Crawl4AI Python microservice.*
+*Note: These actions are forwarded to the Crawl4AI Python microservice. Jobs containing any of these actions will be processed by the `crawl4ai-jobs` queue and `crawl4ai.worker.js`.*
 
-| Action Type      | Description                                                | Parameters (`params`)                                                                                                                                |
-| :--------------- | :--------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `crawl`          | Crawl & extract using schema/strategy                    | `url` (string, required), `schema` (object, optional), `strategy` (string, optional, e.g., `JsonCssExtractionStrategy`), `baseSelector` (string, optional) |
-| `extract`        | Extract specific content (text, html, attribute)           | `url` (string, required), `selector` (string, required), `type` (string, optional, default: `text`), `attribute` (string, optional)                     |
-| `generateSchema` | Generate extraction schema using LLM                     | `url` (string, required), `prompt` (string, required), `model` (string, optional)                                                                    |
-| `verify`         | Verify element existence or content                        | `url` (string, required), `selector` (string, required), `expected` (string, optional)                                                               |
-| `crawlLinks`     | Follow links and extract data                              | `url` (string, required), `link_selector` (string, required), `schema` (object, optional), `max_depth` (number, optional, default: 1)               |
-| `wait` (Crawl4AI)| Wait for an element (delegated to Crawl4AI service)      | `url` (string, required), `selector` (string, required), `timeout` (number, optional, ms, default: 30000)                                            |
-| `filter`         | Filter elements based on condition                         | `url` (string, required), `selector` (string, required), `condition` (string, required, e.g., `href.includes("example.com")`, `text.includes("Price")`) |
-| `screenshot` (Crawl4AI) | Take screenshot (delegated to Crawl4AI service)    | `url` (string, required), `selector` (string, optional), `full_page` (boolean, optional, default: false)                                            |
-| `extractPDF`     | Extract text content from a PDF URL                        | `url` (string, required)                                                                                                                             |
-| `toMarkdown`     | Convert webpage content to Markdown                        | `url` (string, required), `options` (object, optional - see Crawl4AI docs)                                                                           |
-| `toPDF` (Crawl4AI)| Convert webpage to PDF (delegated to Crawl4AI service)   | `url` (string, required)                                                                                                                             |
+| Action Type      | Description                                                | Parameters (`params`)                                                                                                                                                                                                                                                                                                                      | Notes                                                                                                                                            |
+| :--------------- | :--------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `crawl`          | Crawl & extract using schema/strategy                    | `url` (string, required), `schema` (object, optional), `strategy` (string, optional, e.g., `JsonCssExtractionStrategy`, `LLMExtractionStrategy`), `baseSelector` (string, optional), **For LLM:** `llm_provider` (string, e.g., `openai/gpt-4o-mini`, `gemini/gemini-1.5-pro-latest`), `llm_api_key_env_var` (string, e.g., `OPENAI_API_KEY`, `GOOGLE_API_KEY`), `llm_instruction` (string), `llm_extraction_type` (string, `schema` or `block`), `llm_extra_args` (object, optional) | For `LLMExtractionStrategy`, ensure the corresponding API key (`OPENAI_API_KEY` or `GOOGLE_API_KEY`) is set in the `.env` file if the provider requires it. |
+| `extract`        | Extract specific content (text, html, attribute)           | `url` (string, required), `selector` (string, required), `type` (string, optional, default: `text`), `attribute` (string, optional)                                                                                                                                                                                                         | Uses Playwright directly in the Python service for extraction.                                                                                   |
+| `generateSchema` | Generate extraction schema using LLM                     | `url` (string, required), `prompt` (string, required), `model` (string, optional, e.g., `openai/gpt-4o-mini`, `gemini/gemini-1.5-pro-latest`)                                                                                                                                                                                                    | Requires appropriate API key in `.env` if the provider requires it.                                                                              |
+| `verify`         | Verify element existence or content                        | `url` (string, required), `selector` (string, required), `expected` (string, optional)                                                                                                                                                                                                                                                     | Uses Playwright directly in the Python service.                                                                                                  |
+| `crawlLinks`     | Follow links and extract data                              | `url` (string, required), `link_selector` (string, required), `schema` (object, optional), `max_depth` (number, optional, default: 1)                                                                                                                                                                                                         |                                                                                                                                                  |
+| `wait` (Crawl4AI)| Wait for an element (delegated to Crawl4AI service)      | `url` (string, required), `selector` (string, required), `timeout` (number, optional, ms, default: 30000)                                                                                                                                                                                                                                 | Uses Playwright directly in the Python service.                                                                                                  |
+| `filter`         | Filter elements based on condition                         | `url` (string, required), `selector` (string, required), `condition` (string, e.g., `href.includes("pdf")`, `text.includes("Report")`)                                                                                                                                                                                                   | Uses Playwright directly in the Python service.                                                                                                  |
+| `extractPDF`     | Extract text content from a PDF URL                        | `url` (string, required)                                                                                                                                                                                                                                                                                                                   | Fetches and parses PDF content.                                                                                                                  |
+| `toMarkdown`     | Convert webpage content to Markdown                        | `url` (string, required), `options` (object, optional, see Crawl4AI docs)                                                                                                                                                                                                                                                                  | Saves to `/public/markdown` and returns the URL/path.                                                                                            |
+| `toPDF`          | Convert webpage to PDF (via Crawl4AI)                      | `url` (string, required)                                                                                                                                                                                                                                                                                                                   | Saves to `/public/pdfs` and returns the URL/path.                                                                                                |
 
-## Example Jobs
+## Job Action Execution Flow
 
-### Simple Puppeteer Job
+PuppetMaster processes jobs containing multiple actions sequentially within a single worker process (either `puppeteer.worker.js` or `crawl4ai.worker.js` based on the action types).
+
+- **Sequential Execution:** Actions defined in the `actions` array of a job are executed one after another in the order they are listed.
+- **State Management:**
+    - The Puppeteer worker maintains a single browser page instance across actions within a job (e.g., navigating first, then clicking, then scraping).
+    - The Crawl4AI worker typically sends each action as a separate request to the Python service, which is stateless between requests for different actions within the same job.
+- **Result Passing:** **Currently, the result of one action is *not* automatically passed as input to the `params` of the next action.** The parameters for each action are fixed when the job is initially created.
+    - **Workaround:** For complex workflows requiring intermediate results, you need to:
+        1.  Create a job for the first action(s).
+        2.  Wait for the job to complete and retrieve its result (e.g., a scraped URL) from the API (`GET /jobs/:id`).
+        3.  Create a *new* job for the subsequent action(s), using the retrieved result in its `params`.
+    - **Future Enhancement:** A potential future enhancement could involve allowing template variables in action parameters (e.g., `"url": "{{results.action_0.url}}"`), which the worker would resolve before executing the action.
+
+### Example: Simple Job (Single Worker)
 
 ```json
 {
-  "name": "Get Example.com Title and Screenshot",
+  "name": "Login and Scrape Dashboard",
   "actions": [
-    { "type": "navigate", "params": { "url": "https://example.com" } },
-    { "type": "scrape", "params": { "selector": "h1" } },
-    { "type": "screenshot", "params": { "fullPage": true } }
+    { "type": "navigate", "params": { "url": "https://example.com/login" } },
+    { "type": "type", "params": { "selector": "#username", "value": "user" } },
+    { "type": "type", "params": { "selector": "#password", "value": "pass" } },
+    { "type": "click", "params": { "selector": "button[type='submit']" } },
+    { "type": "wait", "params": { "selector": "#dashboard-title" } }, // Wait for dashboard
+    { "type": "scrape", "params": { "selector": ".widget-data", "multiple": true } }
   ]
 }
 ```
+This entire job would be handled by the `puppeteer.worker.js`.
 
-### Crawl4AI Job (Schema Extraction)
-
-```json
-{
-  "name": "Extract Hacker News Stories",
-  "actions": [
-    {
-      "type": "crawl",
-      "params": {
-        "url": "https://news.ycombinator.com",
-        "schema": {
-          "name": "HackerNewsStory",
-          "baseSelector": "tr.athing",
-          "fields": [
-            { "name": "title", "selector": "span.titleline", "type": "text" },
-            { "name": "link", "selector": "span.titleline > a", "type": "attribute", "attribute": "href" },
-            { "name": "rank", "selector": "span.rank", "type": "text" }
-          ]
-        },
-        "strategy": "JsonCssExtractionStrategy"
-      }
-    }
-  ]
-}
-```
-
-### Mixed Job (Puppeteer Navigation + Crawl4AI PDF Extraction)
+### Example: Mixed Job (Requires Manual Chaining)
 
 ```json
+// --- JOB 1 ---
 {
-  "name": "Navigate and Extract PDF",
+  "name": "Navigate and Get PDF Link",
   "actions": [
     { "type": "navigate", "params": { "url": "https://www.example.com/some-page-with-pdf-link" } },
-    { "type": "scrape", "params": { "selector": "a.pdf-link", "attribute": "href" } },
-    { "type": "extractPDF", "params": { "url": "{{action_1.result}}" } } // Placeholder for dynamic URL from previous step (Needs worker logic update for templating)
+    { "type": "scrape", "params": { "selector": "a.pdf-link", "attribute": "href" } }
+    // Worker executes these, result saved to DB: { "action_0": { "url": "..." }, "action_1": "https://example.com/document.pdf" }
+  ]
+}
+
+// --- After Job 1 completes, retrieve the result (e.g., "https://example.com/document.pdf") ---
+
+// --- JOB 2 ---
+{
+  "name": "Extract PDF Text",
+  "actions": [
+    // Use the result from Job 1 here
+    { "type": "extractPDF", "params": { "url": "https://example.com/document.pdf" } }
+    // Worker sends this to Crawl4AI service
   ]
 }
 ```
 
-*Note: Dynamic parameter passing between steps (like in the Mixed Job example) might require enhancements in the worker logic to handle templating or context passing.*
+## Contributing
 
-## Testing
-
-Several test scripts are included to verify functionality:
-
-*   `test-puppeteer.js`: Runs a simple Puppeteer navigation and screenshot task directly.
-*   `test-crawl4ai.js`: Makes direct API calls to the Crawl4AI microservice endpoints. Requires the service to be running.
-*   `test-worker.js`: Simulates processing a specific Puppeteer job locally, useful for debugging worker actions.
-
-Run them using Node.js:
-
-```bash
-node test-puppeteer.js
-node test-crawl4ai.js # Ensure Crawl4AI service is running
-node test-worker.js
-```
+Contributions are welcome! Please refer to the contribution guidelines.
 
 ## License
 

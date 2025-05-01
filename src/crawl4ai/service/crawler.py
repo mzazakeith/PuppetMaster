@@ -12,7 +12,7 @@ import uuid
 from crawl4ai import AsyncWebCrawler
 from crawl4ai.extraction_strategy import JsonCssExtractionStrategy, JsonXPathExtractionStrategy, LLMExtractionStrategy
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
-from crawl4ai import BrowserConfig, CrawlerRunConfig, CacheMode
+from crawl4ai import BrowserConfig, CrawlerRunConfig, CacheMode, LLMConfig
 from pydantic import BaseModel, Field
 
 # Configure logging
@@ -59,17 +59,31 @@ class CrawlerService:
             self.crawler = None
             logger.info("Crawler resources cleaned up")
     
-    async def crawl(self, url: str, schema: Optional[Dict] = None, strategy: str = "JsonCssExtractionStrategy") -> Dict:
+    async def crawl(self, 
+                    url: str, 
+                    schema: Optional[Dict] = None, 
+                    strategy: str = "JsonCssExtractionStrategy",
+                    llm_provider: str = "openai/gpt-4o-mini",  # Default provider
+                    llm_api_key_env_var: Optional[str] = "OPENAI_API_KEY", # Default API key env var name
+                    llm_instruction: str = "Extract structured data based on the provided schema.", # Default instruction
+                    llm_extraction_type: str = "schema", # Default extraction type
+                    llm_extra_args: Optional[Dict] = None # Optional extra args for LLM
+                   ) -> Dict:
         """
         Crawl a webpage and extract structured data using a schema or extraction strategy.
         
         Args:
             url: The URL to crawl
-            schema: Optional schema definition for extraction
-            strategy: Strategy name to use for extraction
-            
+            schema: Optional schema definition for extraction (used by CSS/XPath/LLM schema type)
+            strategy: Strategy name to use for extraction (JsonCssExtractionStrategy, JsonXPathExtractionStrategy, LLMExtractionStrategy)
+            llm_provider: LLM provider string (e.g., "gemini/gemini-1.5-pro-latest", "openai/gpt-4o-mini") used if strategy is LLMExtractionStrategy.
+            llm_api_key_env_var: Environment variable name for the LLM API key (e.g., "GOOGLE_API_KEY", "OPENAI_API_KEY").
+            llm_instruction: Instruction prompt for the LLM used if strategy is LLMExtractionStrategy.
+            llm_extraction_type: Type of LLM extraction ("schema" or "block"). Defaults to "schema".
+            llm_extra_args: Optional dictionary of extra arguments for the LLM (e.g., {"temperature": 0.5}).
+
         Returns:
-            Dictionary with extracted data
+            Dictionary with extracted data or error information.
         """
         await self.initialize()
         
@@ -94,21 +108,46 @@ class CrawlerService:
             # Select the extraction strategy
             extraction_strategy = None
             if strategy == "JsonCssExtractionStrategy":
-                extraction_strategy = JsonCssExtractionStrategy(schema=schema_dict if extraction_schema else None)
+                if not schema_dict:
+                    logger.warning("JsonCssExtractionStrategy selected but no valid schema provided.")
+                    return {"error": "Schema is required for JsonCssExtractionStrategy", "success": False}
+                extraction_strategy = JsonCssExtractionStrategy(schema=schema_dict)
             elif strategy == "JsonXPathExtractionStrategy":
-                extraction_strategy = JsonXPathExtractionStrategy(schema=schema_dict if extraction_schema else None)
+                 if not schema_dict:
+                    logger.warning("JsonXPathExtractionStrategy selected but no valid schema provided.")
+                    return {"error": "Schema is required for JsonXPathExtractionStrategy", "success": False}
+                 extraction_strategy = JsonXPathExtractionStrategy(schema=schema_dict)
             elif strategy == "LLMExtractionStrategy":
-                # For LLM strategy we would need more parameters like config, instruction, etc.
-                # Using a simple default here
-                extraction_strategy = LLMExtractionStrategy(
-                    provider="openai/gpt-4o-mini",
-                    extraction_type="schema",
-                    instruction="Extract structured data from the page"
+                # Fetch API key from environment if the variable name is provided
+                api_key = None
+                if llm_api_key_env_var:
+                    api_key = os.getenv(llm_api_key_env_var)
+                    if not api_key:
+                         logger.warning(f"LLM API key environment variable '{llm_api_key_env_var}' not set.")
+                         # Depending on the provider (e.g., local Ollama), this might be okay.
+
+                # Configure LLMConfig
+                llm_config = LLMConfig(
+                    provider=llm_provider,
+                    api_token=api_key 
+                    # Add base_url or other LLMConfig params here if needed
                 )
-            
+
+                # Create LLMExtractionStrategy
+                extraction_strategy = LLMExtractionStrategy(
+                    llm_config=llm_config,
+                    schema=schema_dict if llm_extraction_type == "schema" else None, # Pass schema only if type is schema
+                    extraction_type=llm_extraction_type,
+                    instruction=llm_instruction,
+                    extra_args=llm_extra_args or {} # Pass extra args
+                    # Add other LLMExtractionStrategy params like chunking here if needed
+                )
+            else:
+                logger.warning(f"Unsupported extraction strategy: {strategy}. No extraction will be performed.")
+
             # Create the crawl config
             crawl_config = CrawlerRunConfig(
-                extraction_strategy=extraction_strategy,
+                extraction_strategy=extraction_strategy, # Can be None if strategy is unsupported
                 cache_mode=CacheMode.BYPASS
             )
             
