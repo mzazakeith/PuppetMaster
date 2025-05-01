@@ -6,10 +6,10 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "start:worker": "node test-worker.js",
-    "dev:worker": "nodemon test-worker.js",
+    "start:worker": "node src/workers/puppeteer.worker.js",
+    "dev:worker": "nodemon src/workers/puppeteer.worker.js",
     "start:crawl4ai": "./start-crawl4ai.sh",
-    "start:all": "concurrently \"npm run start\" \"npm run start:worker\"",
+    "start:all": "concurrently \"npm run start\" \"npm run start:worker\" \"npm run start:crawl4ai\"",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:worker\" \"npm run start:crawl4ai\""
   },
   "dependencies": {
