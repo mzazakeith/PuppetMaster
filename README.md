@@ -2,6 +2,8 @@
 
 A powerful microservice for web automation, scraping, and data processing, integrating Puppeteer for browser control and Crawl4AI for advanced crawling and AI-powered extraction.
 
+[<img src="https://devin.ai/assets/askdeepwiki.png" alt="Ask https://DeepWiki.com" height="20"/>](https://deepwiki.com/mzazakeith/PuppetMaster)
+
 ## Features
 
 - **Puppeteer Core:**
